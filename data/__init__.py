@@ -2,14 +2,18 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import json
+
+from ast import literal_eval
+
 sns.set_theme(style='dark')
 
-def load_tlc_data(borough='Manhattan', freq='1D'):
-    taxi_zone_lookup = pd.read_csv('tlc/taxi+_zone_lookup.csv', sep=',')
+def load_tlc_data(borough='Manhattan', freq='1D', eps=1):
+    taxi_zone_lookup = pd.read_csv('data/tlc/taxi+_zone_lookup.csv', sep=',')
     taxi_zone_lookup = taxi_zone_lookup.dropna()
     taxi_zone_lookup['LocationID'] = taxi_zone_lookup['LocationID'].astype(int)
     taxi_zone_lookup.set_index('LocationID', inplace=True)
-    fhv_trips = pd.read_csv('tlc/fhv_tripdata_2021-01.csv', sep=',')
+    fhv_trips = pd.read_csv('data/tlc/fhv_tripdata_2021-01.csv', sep=',')
     fhv_trips.dropna(subset=['PULocationID', 'DOLocationID'], how='any', inplace=True)
     fhv_trips['PULocationID'] = fhv_trips['PULocationID'].astype(int)
     fhv_trips['DOLocationID'] = fhv_trips['DOLocationID'].astype(int)
@@ -35,7 +39,7 @@ def load_tlc_data(borough='Manhattan', freq='1D'):
 
     P = np.zeros(shape=(T, n, n), dtype=np.float64)
     c = np.zeros(shape=(T, n), dtype=np.float64)
-    b = np.zeros(shape=(T, n), dtype=np.float64)
+    b = eps * np.ones(shape=(T, n), dtype=np.float64)
 
     for t, (timestamp, df) in enumerate(fhv_trips_resampled):
         for i, row in enumerate(df.iterrows()):
@@ -50,14 +54,14 @@ def load_tlc_data(borough='Manhattan', freq='1D'):
     return P, b, c, loc2idx, idx2zone
 
 def plot_tlc_data(borough='Manhattan', freq='1D'):
-    P, b, c, loc2idx, idx2zone = load_tlc_data(borough=borough, freq=freq) 
+    P, b, c, loc2idx, idx2zone = load_tlc_data(borough=borough, freq=freq)
     timestamp_range = 1 + np.arange(P.shape[0])
 
     plt.figure(figsize=(10, 10))
     plt.xlabel('Timestamp (Days)', fontsize=16)
     plt.ylabel('# Rides', fontsize=16)
     plt.title('Aggregate Rides', fontsize=16)
-    
+
     plt.plot(timestamp_range, c.sum(-1), color='g', marker='o', label='Total external inbound rides')
     plt.plot(timestamp_range, b.sum(-1), color='b', marker='o', label='Total external outbound rides')
     plt.plot(timestamp_range, P.sum(-1).sum(-1), color='k', marker='o', label='Total internal inbound/outbound rides')
@@ -70,7 +74,7 @@ def plot_tlc_data(borough='Manhattan', freq='1D'):
     plt.xlabel('Timestamp (Days)', fontsize=16)
     plt.ylabel('# Rides $c(t)$', fontsize=16)
     plt.title('External inbound rides', fontsize=16)
-    
+
     idxs = np.argsort(-c.sum(0))[:5]
     labels = [idx2zone[i]  for i in idxs]
 
@@ -86,7 +90,7 @@ def plot_tlc_data(borough='Manhattan', freq='1D'):
     plt.xlabel('Timestamp (Days)', fontsize=16)
     plt.ylabel('# Rides $b(t)$', fontsize=16)
     plt.title('External outbound rides', fontsize=16)
-    
+
     idxs = np.argsort(-b.sum(0))[:5]
     labels = [idx2zone[i]  for i in idxs]
 
@@ -101,7 +105,7 @@ def plot_tlc_data(borough='Manhattan', freq='1D'):
     plt.xlabel('Timestamp (Days)', fontsize=16)
     plt.ylabel('# Rides $\sum_j p_j(t)$', fontsize=16)
     plt.title('Internal outbound rides', fontsize=16)
-    
+
     idxs = np.argsort(-P.sum(0).sum(0))[:5]
     labels = [idx2zone[i]  for i in idxs]
 
@@ -112,4 +116,139 @@ def plot_tlc_data(borough='Manhattan', freq='1D'):
 
     plt.savefig('internal_outbound_tlc.png')
 
+def generate_synthetic_data(n=50, T=10):
 
+    probs = 0.1 * np.ones(shape=(T, n, n))
+    probs[:, :, :10] += 0.25
+    probs[:, :10, :] += 0.25
+
+    u = np.random.uniform(size=(T, n, n))
+
+    G = (u <= probs).astype(np.float64)
+
+    b = np.random.exponential(1, size=(T, n))
+
+    c = np.random.exponential(1, size=(T, n))
+    L = G * np.random.exponential(1, size=(T, n, n))
+
+    loc2idx = dict([(i, i) for i in range(n)])
+    idx2zone = dict([(i, i) for i in range(n)])
+
+    return L, b, c, loc2idx, idx2zone
+
+
+def generate_synthetic_data_lp(n=2, T=10, method='deterministic'):
+
+    # probs = 0.1 * np.ones(shape=(n, n))
+    # probs[:, :10] += 0.25
+    # probs[:10, :] += 0.25
+    #
+    # u = np.random.uniform(size=(n, n))
+    # G = (u <= probs).astype(np.float64)
+    G = 1 - np.eye(n).astype(np.float64)
+    L = np.zeros((T, n, n)).astype(np.float64)
+
+    if method == 'deterministic':
+        for t in range(T):
+            L[t, :, :] = G
+        b = np.ones((T, n)).astype(np.float64)
+        c = (n / 2) * np.ones((T, n)).astype(np.float64)
+        c = np.zeros((T, n)).astype(np.float64)
+    elif method == 'random':
+        c = (n / 2) * np.random.exponential(1, size=(T, n))
+        b = np.random.exponential(1, (T, n))
+        A0 = np.random.dirichlet(np.ones(n), n)
+        for i in range(n):
+            A0[i, i] = 0
+
+        for t in range(T):
+            for i in range(n):
+                R = np.eye(n).astype(np.float64)
+                for j in range(n):
+                    R[j, :] -= A0[i, j]
+                L[t, :, :] = np.linalg.solve(R, b[t, i] * A0[i, :])
+
+    loc2idx = dict([(i, i) for i in range(n)])
+    idx2zone = dict([(i, i) for i in range(n)])
+
+    return L, b, c, loc2idx, idx2zone
+
+def load_venmo_data(filename):
+
+    with open(filename) as f:
+        data = json.loads(f.read())
+
+    timestamps = set([])
+    timestamp_counter = 0
+
+    node2idx = {}
+    node_counter = 0
+
+    for key1 in data:
+        for key2 in data[key1]:
+            try:
+                temp = literal_eval(key2)
+            except:
+                pass
+            timestamp = temp[0]
+            timestamps |= {int(timestamp)}
+
+    timestamp2idx = dict([(t, i) for (i, t) in enumerate(sorted(list(timestamps)))])
+
+    for key1 in data:
+        for key2 in data[key1]:
+            try:
+                temp = literal_eval(key2)
+            except:
+                pass
+            timestamp = temp[0]
+            if len(temp) >= 2:
+                u = temp[1]
+            if len(temp) == 3:
+                v = temp[2]
+
+            if u not in node2idx:
+                node2idx[u] = node_counter
+                node_counter += 1
+
+            if len(temp) == 3 and v not in node2idx:
+                node2idx[v] = node_counter
+                node_counter += 1
+
+    idx2node = dict([(val, key) for key, val in node2idx.items()])
+
+
+    n = len(node2idx)
+    T = len(timestamp2idx)
+
+    L = np.zeros((T, n, n))
+    b = np.zeros((T, n))
+    c = np.zeros((T, n))
+
+    for key1 in data:
+        for key2, val2 in data[key1].items():
+            try:
+                temp = literal_eval(key2)
+            except:
+                continue
+            timestamp = int(temp[0])
+            timestamp = timestamp2idx[timestamp]
+
+            if len(temp) >= 2:
+                u = temp[1]
+                u = node2idx[u]
+            if len(temp) == 3:
+                v = temp[2]
+                v = node2idx[v]
+
+
+            if key1 == 'L':
+                L[timestamp, u, v] = np.random.exponential(scale=1, size=val2).sum()
+            elif key1 == 'b':
+                b[timestamp, u] = np.random.exponential(scale=1, size=val2).sum()
+            elif key1 == 'c':
+                c[timestamp, u] = np.random.exponential(scale=1, size=val2).sum()
+
+    b = np.maximum(1, b)
+
+    return L, b, c, node2idx, idx2node
