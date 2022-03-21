@@ -285,7 +285,7 @@ if __name__ == '__main__':
         R2 = np.corrcoef(p_bars_total[:, 0], z_bars_total[:, 0])[0, 1]
         sns.regplot(x=p_bars_total, y=z_bars_total, ax=ax, color=color_ols)
         sns.regplot(x=p_bars_total, y=z_bars_total, ax=ax, color=color_rlm, robust=True, scatter_kws={'alpha' : 1, 'color' : 'k'})
-        red_patch = mpatches.Patch(color=color_ols, label='OLS, B = {}, R2 = {}'.format(B, R2))
+        red_patch = mpatches.Patch(color=color_ols, label='OLS, B = {}, R2 = {}'.format(B, round(R2, 3)))
         blue_patch = mpatches.Patch(color=color_rlm, label='Robust LM, B = {}'.format(B))
 
     plt.legend(handles=[red_patch, blue_patch], fontsize=FONT_SIZE)
@@ -307,7 +307,7 @@ if __name__ == '__main__':
         R2 = np.corrcoef(betas_total, z_bars_total[:, 0])[0, 1]
         sns.regplot(x=betas_total, y=z_bars_total, ax=ax, color=color_ols)
         sns.regplot(x=betas_total, y=z_bars_total, ax=ax, color=color_rlm, robust=True, scatter_kws={'alpha' : 1, 'color' : 'k'})
-        red_patch = mpatches.Patch(color=color_ols, label='OLS, B = {}, R2 = {}'.format(B, R2))
+        red_patch = mpatches.Patch(color=color_ols, label='OLS, B = {}, R2 = {}'.format(B, round(R2, 3)))
         blue_patch = mpatches.Patch(color=color_rlm, label='Robust LM, B = {}'.format(B))
 
     plt.legend(handles=[red_patch, blue_patch], fontsize=FONT_SIZE)
