@@ -8,11 +8,13 @@ import argparse
 import itertools
 import collections
 
+from scipy import sparse
+
 FONT_SIZE = 22
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--name', type=str, default='tlc', choices=['tlc', 'synthetic', 'synthetic_lp', 'venmo'])
+    parser.add_argument('--name', type=str, default='tlc', choices=['tlc', 'synthetic', 'synthetic_lp', 'venmo', 'safegraph'])
     parser.add_argument('--filename', type=str, default='data/venmo_jul_2018.json')
     parser.add_argument('--num_iters', type=int, default=1)
     parser.add_argument('-B', type=str, default='0')
@@ -26,8 +28,8 @@ def get_mean_std(x):
     x = np.array(x)
     return x.mean(0), x.std(0)
 
-def spatial_gini_coefficient(A_inst, beta_inst, z_bar):
-    varpi_bar = np.zeros_like(A_inst)
+def spatial_gini_coefficient(n, A_inst, beta_inst, z_bar):
+    varpi_bar = np.zeros((n, n))
     for i in range(n):
         for j in range(n):
             varpi_bar[i, j] = np.abs(z_bar[i, 0] - z_bar[j, 0])
@@ -51,6 +53,9 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
 
     for i in range(n):
         A_inst[i, :] /= p[i, 0]
+
+    A_inst = sparse.csr_matrix(A_inst)
+
     constraints = [p_bar >= 0, z_bar >= 0, z_bar <= L_bailouts, cp.sum(z_bar) <= B, p_bar <= p, p_bar <= A_inst.T @ p_bar + c_inst + z_bar]
 
     beta_inst = A_inst.sum(-1)
@@ -67,7 +72,7 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
     prob = cp.Problem(objective, constraints)
     result = prob.solve(verbose=verbose)
     beta_max = beta_inst.max()
-    sgc = spatial_gini_coefficient(A_inst, beta_inst, z_bar.value)
+    sgc = spatial_gini_coefficient(n, A_inst, beta_inst, z_bar.value)
 
     if verbose:
 
@@ -80,6 +85,8 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
         print('Bailout constraint', constraints[2].dual_value)
         print('Solvency constraint', constraints[3].dual_value)
         print('Default constraint', constraints[4].dual_value)
+
+    beta_inst = beta_inst.reshape(n)
 
     return p_bar.value, z_bar.value, p, result, beta_inst, beta_max, sgc
 
@@ -179,13 +186,16 @@ if __name__ == '__main__':
                 L, b, c, loc2idx, idx2zone = data.generate_synthetic_data_lp(T=20, n=10)
             elif args.name == 'venmo':
                 L, b, c, loc2idx, idx2zone = data.load_venmo_data(args.filename)
+            elif args.name == 'safegraph':
+                L, b, c, L_bailouts, loc2idx, idx2zone = data.load_safegraph_data()
 
             n, T = L.shape[1], L.shape[0]
 
-            if args.L > 0:
-                L_bailouts = args.L * np.ones((T, n, 1))
-            else:
-                L_bailouts = B * np.ones((T, n, 1))
+            if args.name != 'safegraph':
+                if args.L > 0:
+                    L_bailouts = args.L * np.ones((T, n, 1))
+                else:
+                    L_bailouts = B * np.ones((T, n, 1))
 
             p_bar, z_bar, cum_rewards, beta, beta_max, sgc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=args.gini)
             p_bars[B].append(p_bar)
@@ -206,7 +216,7 @@ if __name__ == '__main__':
 
         ax2 = ax1.twinx()
 
-        t_range = 1 + np.arange(T)
+        t_range = (1 + np.arange(T)).astype(str)
 
         ax1.set_ylabel('Clearing Payments', fontsize=FONT_SIZE)
         ax2.set_ylabel('Cummulative Reward', color='gold', fontsize=FONT_SIZE)

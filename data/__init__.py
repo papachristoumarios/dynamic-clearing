@@ -3,8 +3,10 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import json
+import networkx as nx
 
 from ast import literal_eval
+from scipy import sparse
 
 sns.set_theme(style='dark')
 
@@ -241,7 +243,6 @@ def load_venmo_data(filename):
                 v = temp[2]
                 v = node2idx[v]
 
-
             if key1 == 'L':
                 L[timestamp, u, v] = np.random.exponential(scale=1, size=val2).sum()
             elif key1 == 'b':
@@ -252,3 +253,51 @@ def load_venmo_data(filename):
     b = np.maximum(1, b)
 
     return L, b, c, node2idx, idx2node
+
+def load_safegraph_data():
+    Gs = []
+    T = 5
+
+    for i in range(1, T + 1):
+        G = nx.DiGraph(nx.read_gpickle('data/safegraph/graph_{}.gpickle'.format(i)))
+        Gs.append(G)
+
+    node2idx = {}
+    counter = 0
+    for G in Gs:
+        for u in G.nodes():
+            if u not in node2idx:
+                node2idx[u] = counter
+                counter += 1
+
+    idx2node = {}
+
+    for G in Gs:
+        for u, data in G.nodes(data=True):
+            u_idx = node2idx[u]
+
+            if isinstance(u, int):
+                idx2node[u_idx] = 'CBG_' + str(u)
+            else:
+                idx2node[u_idx] = 'POI_' + data.get('brand_name', u)
+
+    n = len(node2idx)
+
+    L = np.zeros((T, n, n))
+    b = np.zeros((T, n))
+    c = np.zeros((T, n))
+    L_bailouts = np.zeros((T, n, 1))
+
+    for t, G in enumerate(Gs):
+        for u, data in G.nodes(data=True):
+            b[t, node2idx[u]] = data.get('liabilities', 0)
+            c[t, node2idx[u]] = data.get('assets', 0)
+            L_bailouts[t, node2idx[u], 0] = data.get('L', 0)
+
+    b = np.maximum(b, 100)
+
+    for t, G in enumerate(Gs):
+        for u, v, data in G.edges(data=True):
+            L[t, node2idx[u], node2idx[v]] += data.get('weight', 0)
+
+    return L, b, c, L_bailouts, node2idx, idx2node
