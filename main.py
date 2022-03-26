@@ -22,25 +22,30 @@ def get_args():
     parser.add_argument('--method', type=str, default='fractional', choices=['fractional', 'discrete'])
     parser.add_argument('--gini', default=1, type=float)
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--gini_type', type=str, default='sgc', choices=['sgc', 'standard', 'pgc'])
     return parser.parse_args()
 
 def get_mean_std(x):
     x = np.array(x)
     return x.mean(0), x.std(0)
 
-def spatial_gini_coefficient(n, A_inst, beta_inst, z_bar):
+def generic_gini_coefficient(n, W, row_sum, col_sum, z_bar):
     varpi_bar = np.zeros((n, n))
     for i in range(n):
         for j in range(n):
             varpi_bar[i, j] = np.abs(z_bar[i, 0] - z_bar[j, 0])
-    num = np.sum(A_inst * varpi_bar)
-    den = 2 * np.sum(beta_inst * z_bar[:, 0])
+    num = np.sum(W * varpi_bar)
+    den = np.sum((row_sum + col_sum) * z_bar[:, 0])
+
     if np.isclose(den, 0):
         return 0
     else:
         return num / den
 
-def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=False, gini=1):
+def generate_generic_gini_coefficient_constraints(n, W, row_sum, col_sum, z_bar, varpi_bar, gini):
+    return cp.sum(cp.multiply(W, varpi_bar)) <= gini * cp.sum(cp.multiply(row_sum + col_sum, z_bar[:, 0]))
+
+def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=False, gini=1, gini_type='sgc'):
     p = (b_inst + L_inst.sum(-1)).reshape((n, 1))
     p_bar = cp.Variable((n, 1))
     z_bar = cp.Variable((n, 1))
@@ -54,11 +59,12 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
     for i in range(n):
         A_inst[i, :] /= p[i, 0]
 
-    A_inst = sparse.csr_matrix(A_inst)
+    # A_inst = sparse.csr_matrix(A_inst)
 
     constraints = [p_bar >= 0, z_bar >= 0, z_bar <= L_bailouts, cp.sum(z_bar) <= B, p_bar <= p, p_bar <= A_inst.T @ p_bar + c_inst + z_bar]
 
     beta_inst = A_inst.sum(-1)
+    col_sum = A_inst.sum(0)
 
     if gini < 1:
         constraints.append(varpi_bar >= 0)
@@ -66,13 +72,29 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
             for j in range(n):
                 constraints.append(-varpi_bar[i, j] <= z_bar[i, 0] - z_bar[j, 0])
                 constraints.append(z_bar[i, 0] - z_bar[j, 0] <= varpi_bar[i, j])
-
-        constraints.append(cp.sum(cp.multiply(A_inst, varpi_bar)) <= 2 * gini * cp.sum(cp.multiply(beta_inst, z_bar[:, 0])))
+        if gini_type == 'sgc':
+            constraints.append(generate_generic_gini_coefficient_constraints(n, A_inst, beta_inst, col_sum, z_bar, varpi_bar, gini))
+        elif gini_type == 'standard':
+            constraints.append(generate_generic_gini_coefficient_constraints(n, 1.0 - np.eye(n), (n - 1) * np.ones(n), (n - 1) * np.ones(n), z_bar, varpi_bar, gini))
 
     prob = cp.Problem(objective, constraints)
     result = prob.solve(verbose=verbose)
     beta_max = beta_inst.max()
-    sgc = spatial_gini_coefficient(n, A_inst, beta_inst, z_bar.value)
+
+    if gini_type == 'sgc':
+        gc = generic_gini_coefficient(n, A_inst, beta_inst, col_sum, z_bar.value)
+    elif gini_type == 'standard':
+        gc = generic_gini_coefficient(n, 1 - np.eye(n), (n - 1) * np.ones(n), (n - 1) * np.ones(n), z_bar.value)
+
+    zz = np.zeros_like(z_bar.value)
+    zz[0] = 1
+    d = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            d[i, j] = abs(zz[i, 0] - zz[j, 0])
+
+    num = np.sum(A_inst * d)
+    den = np.sum((A_inst.sum(0) + A_inst.sum(-1)) * zz[:, 0])
 
     if verbose:
 
@@ -88,9 +110,9 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
 
     beta_inst = beta_inst.reshape(n)
 
-    return p_bar.value, z_bar.value, p, result, beta_inst, beta_max, sgc
+    return p_bar.value, z_bar.value, p, result, beta_inst, beta_max, gc
 
-def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=False, gini=1):
+def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=False, gini=1, gini_type='sgc'):
     if method == 'fractional':
         p_bar = np.zeros((T, n, 1))
         z_bar = np.zeros((T, n, 1))
@@ -99,25 +121,25 @@ def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbo
         beta = np.zeros((T, n))
         beta_max = np.zeros((T, 1))
         rewards = np.zeros(T)
-        sgcs = np.zeros(T)
+        gcs = np.zeros(T)
 
         for t in range(T):
             if t == 0:
-                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], sgcs[t] = single_period_clearing(L[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini)
+                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type)
             else:
                 # Calculate uncleared liabilities
                 L_bar[t, :, :] = L_bar[t - 1, :, :] + L[t, :, :]
-                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], sgcs[t] = single_period_clearing(L_bar[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini)
+                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L_bar[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type)
 
             for i in range(n):
                 for j in range(n):
                     L_bar[t, i, j] = L[t, i, j] * (1 - p_bar[t, i, 0] / p[t, i, 0])
         cum_reward = np.cumsum(rewards)
 
-        return p_bar, z_bar, cum_reward, beta, beta_max, sgcs
+        return p_bar, z_bar, cum_reward, beta, beta_max, gcs
     elif method == 'discrete':
         # Solve fractional problem
-        p_bar, z_bar, cum_reward, beta, beta_max, sgcs = sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=verbose, gini=gini)
+        p_bar, z_bar, cum_reward, beta, beta_max, gcs = sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=verbose, gini=gini, gini_type=gini_type)
 
         z_bar_rounded = np.zeros_like(z_bar)
 
@@ -126,12 +148,12 @@ def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbo
             for t in range(T):
                 for i in range(n):
                     z_bar_rounded[t, i, 0] = 1.0 * np.random.binomial(L_bailouts[t, i, 0], np.maximum(0, np.minimum(1, z_bar[t, i, 0] / L_bailouts[t, i, 0])))
-            if (gini >= 1 and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))) or(gini < 1 and sgcs.max() <= gini and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))):
+            if (gini >= 1 and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))) or(gini < 1 and gcs.max() <= gini and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))):
                 break
 
-        p_bar_rounded, _, cum_reward_rounded, beta_rounded, beta_max_rounded, sgcs = sequential_clearing(L, b, c + z_bar_rounded.reshape(c.shape), 0, n, T, L_bailouts, method='fractional', verbose=verbose, gini=1)
+        p_bar_rounded, _, cum_reward_rounded, beta_rounded, beta_max_rounded, gcs = sequential_clearing(L, b, c + z_bar_rounded.reshape(c.shape), 0, n, T, L_bailouts, method='fractional', verbose=verbose, gini=1, gini_type=gini_type)
 
-        return p_bar_rounded, z_bar_rounded, cum_reward_rounded, beta_rounded, beta_max_rounded, sgcs
+        return p_bar_rounded, z_bar_rounded, cum_reward_rounded, beta_rounded, beta_max_rounded, gcs
 
 def assert_lp_condition(L, b):
     n = b.shape[-1]
@@ -163,9 +185,9 @@ if __name__ == '__main__':
     beta_maxs = collections.defaultdict(list)
     beta_maxs_mean = {}
     beta_maxs_std = {}
-    sgcs = collections.defaultdict(list)
-    sgcs_mean = {}
-    sgcs_std = {}
+    gcs = collections.defaultdict(list)
+    gcs_mean = {}
+    gcs_std = {}
     p_bars = collections.defaultdict(list)
     z_bars = collections.defaultdict(list)
     cum_rewardss = collections.defaultdict(list)
@@ -197,12 +219,12 @@ if __name__ == '__main__':
                 else:
                     L_bailouts = B * np.ones((T, n, 1))
 
-            p_bar, z_bar, cum_rewards, beta, beta_max, sgc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=args.gini)
+            p_bar, z_bar, cum_rewards, beta, beta_max, gc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=args.gini, gini_type=args.gini_type)
             p_bars[B].append(p_bar)
             z_bars[B].append(z_bar)
             cum_rewardss[B].append(cum_rewards)
             beta_maxs[B].append(beta_max)
-            sgcs[B].append(sgc)
+            gcs[B].append(gc)
             betas[B].append(beta)
 
         p_bars_mean[B], p_bars_std[B] = get_mean_std(p_bars[B])
@@ -210,7 +232,7 @@ if __name__ == '__main__':
         cum_rewardss_mean[B], cum_rewardss_std[B] = get_mean_std(cum_rewardss[B])
         beta_maxs_mean[B], beta_maxs_std[B] = get_mean_std(beta_maxs[B])
         betas_mean[B], betas_std[B] = get_mean_std(betas[B])
-        sgcs_mean[B], sgcs_std[B] = get_mean_std(sgcs[B])
+        gcs_mean[B], gcs_std[B] = get_mean_std(gcs[B])
 
         fig, ax1 = plt.subplots(figsize=(10, 5))
 
@@ -237,7 +259,7 @@ if __name__ == '__main__':
         ax1.legend().set_zorder(-np.inf)
         ax2.legend().set_zorder(-np.inf)
 
-        plt.savefig('{}_{}_sequential_clearing_{}_{}.png'.format(args.method, args.name, B, args.gini))
+        plt.savefig('{}_{}_sequential_clearing_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
         fig, ax1 = plt.subplots(figsize=(10, 5))
 
@@ -253,7 +275,7 @@ if __name__ == '__main__':
             ax1.fill_between(t_range, np.maximum(0, z_bars_mean[B][:, i, 0] - z_bars_std[B][:, i, 0]), z_bars_mean[B][:, i, 0] +  z_bars_std[B][:, i, 0], alpha=0.3)
         ax1.legend()
         fig.tight_layout()
-        plt.savefig('{}_{}_sequential_clearing_bailouts_{}_{}.png'.format(args.method, args.name, B, args.gini))
+        plt.savefig('{}_{}_sequential_clearing_bailouts_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
     plt.figure(figsize=(10, 5))
     plt.ylabel('Worst financial connectivity', fontsize=FONT_SIZE)
@@ -264,21 +286,25 @@ if __name__ == '__main__':
         plt.fill_between(t_range, beta_maxs_mean[B][:, 0] - beta_maxs_std[B][:, 0], beta_maxs_mean[B][:, 0] + beta_maxs_std[B][:, 0], alpha=0.3)
 
     plt.legend(fontsize=14)
-    plt.savefig('{}_{}_worst_financial_connectivity_{}_{}.png'.format(args.method, args.name, B, args.gini))
+    plt.savefig('{}_{}_worst_financial_connectivity_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
     plt.figure(figsize=(10, 5))
-    plt.title('Spatial Gini Coefficient {}'.format('($g = {}$)'.format(args.gini) if args.gini < 1 else ''), fontsize=FONT_SIZE)
-    plt.ylabel('SGC', fontsize=FONT_SIZE)
+    if args.gini_type == 'sgc':
+        plt.title('Spatial Gini Coefficient {}'.format('($g = {}$)'.format(args.gini) if args.gini < 1 else ''), fontsize=FONT_SIZE)
+        plt.ylabel('SGC', fontsize=FONT_SIZE)
+    if args.gini_type == 'standard':
+        plt.title('Standard Gini Coefficient {}'.format('($g = {}$)'.format(args.gini) if args.gini < 1 else ''), fontsize=FONT_SIZE)
+        plt.ylabel('GC', fontsize=FONT_SIZE)
 
     plt.xlabel('Time', fontsize=FONT_SIZE)
     for B in B_range:
-        plt.plot(t_range, sgcs_mean[B], marker='o', label='B = {}'.format(B))
-        plt.fill_between(t_range, sgcs_mean[B] - sgcs_std[B], sgcs_mean[B] + sgcs_std[B], alpha=0.3)
+        plt.plot(t_range, gcs_mean[B], marker='o', label='B = {}'.format(B))
+        plt.fill_between(t_range, gcs_mean[B] - gcs_std[B], gcs_mean[B] + gcs_std[B], alpha=0.3)
 
     plt.legend(fontsize=14)
     plt.tight_layout()
     plt.ylim(0, 1)
-    plt.savefig('{}_{}_spatial_gini_coefficient_{}_{}.png'.format(args.method, args.name, B, args.gini))
+    plt.savefig('{}_{}_gini_coefficient_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
     fig, ax = plt.subplots(figsize=(10, 10))
     plt.title('Bailouts vs. Payments', fontsize=FONT_SIZE)
@@ -300,7 +326,7 @@ if __name__ == '__main__':
 
     plt.legend(handles=[red_patch, blue_patch], fontsize=FONT_SIZE)
     plt.tight_layout()
-    plt.savefig('{}_{}_payments_vs_bailouts_{}_{}.png'.format(args.method, args.name, B, args.gini))
+    plt.savefig('{}_{}_payments_vs_bailouts_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
     fig, ax = plt.subplots(figsize=(10, 10))
     plt.title('Bailouts vs. Mean Financial Connectivity', fontsize=FONT_SIZE)
@@ -322,4 +348,4 @@ if __name__ == '__main__':
 
     plt.legend(handles=[red_patch, blue_patch], fontsize=FONT_SIZE)
     plt.tight_layout()
-    plt.savefig('{}_{}_betas_vs_bailouts_{}_{}.png'.format(args.method, args.name, B, args.gini))
+    plt.savefig('{}_{}_betas_vs_bailouts_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
