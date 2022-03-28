@@ -349,3 +349,27 @@ if __name__ == '__main__':
     plt.legend(handles=[red_patch, blue_patch], fontsize=FONT_SIZE)
     plt.tight_layout()
     plt.savefig('{}_{}_betas_vs_bailouts_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
+
+    if args.gini < 1:
+        objective_with_fairness = {}
+        for B in B_range:
+            objective_with_fairness[B] = cum_rewardss_mean[B][-1]
+
+        cum_rewardss = collections.defaultdict(list)
+        cum_rewardss_mean = {}
+        cum_rewardss_std = {}
+
+        for B in B_range:
+            for _ in range(args.num_iters):
+                _, _, cum_rewards, _, _, gc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=1, gini_type=args.gini_type)
+                cum_rewardss[B].append(cum_rewards)
+
+            cum_rewardss_mean[B], cum_rewardss_std[B] = get_mean_std(cum_rewardss[B])
+
+        objective_without_fairness = {}
+
+        for B in B_range:
+            objective_without_fairness[B] = cum_rewardss_mean[B][-1]
+
+        for B in B_range:
+            print('PoF (B = {}) = {}'.format(B, round(objective_without_fairness[B] / objective_with_fairness[B], 3)))
