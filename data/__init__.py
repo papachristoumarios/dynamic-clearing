@@ -317,15 +317,15 @@ def load_safegraph_data():
         for u, v, data in G.edges(data=True):
             L[t, node2idx[u], node2idx[v]] += data.get('weight', 0)
 
-    # for i in range(n):
-    #     L_mean = L_bailouts[:, i].sum() / (1.0 * max(1, (L_bailouts[:, i] > 0).sum()))
-    #     if L_mean > 0:
-    #         for t in range(T):
-    #             if L_bailouts[t, i] == 0:
-    #                 L_bailouts[t, i] = L_mean
-    #     elif idx2node[i].startswith('CBG'):
-    #         L_bailouts[:, i] = L_cbg_mean_bailout
-    #     else:
-    #         L_bailouts[:, i] = L_poi_mean_bailout
+    for i in range(n):
+        L_mean = L_bailouts[:, i].sum() / (1.0 * max(1, (L_bailouts[:, i] > 0).sum()))
+        if L_mean > 0:
+            for t in range(T):
+                if L_bailouts[t, i] == 0:
+                    L_bailouts[t, i] = L_mean
+        elif idx2node[i].startswith('CBG'):
+            L_bailouts[:, i] = L_cbg_mean_bailout
+        else:
+            L_bailouts[:, i] = L_poi_mean_bailout
 
     return L, b, c, L_bailouts, node2idx, idx2node
