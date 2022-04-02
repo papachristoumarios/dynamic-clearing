@@ -23,6 +23,7 @@ def get_args():
     parser.add_argument('--gini', default=1, type=float)
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--gini_type', type=str, default='sgc', choices=['sgc', 'standard', 'pgc'])
+    parser.add_argument('--solver', type=str, default='ECOS')
     return parser.parse_args()
 
 def get_mean_std(x):
@@ -45,7 +46,7 @@ def generic_gini_coefficient(n, W, row_sum, col_sum, z_bar):
 def generate_generic_gini_coefficient_constraints(n, W, row_sum, col_sum, z_bar, varpi_bar, gini):
     return cp.sum(cp.multiply(W, varpi_bar)) <= gini * cp.sum(cp.multiply(row_sum + col_sum, z_bar[:, 0]))
 
-def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=False, gini=1, gini_type='sgc'):
+def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=False, gini=1, gini_type='sgc', solver='ECOS'):
     p = (b_inst + L_inst.sum(-1)).reshape((n, 1))
     p_bar = cp.Variable((n, 1))
     z_bar = cp.Variable((n, 1))
@@ -78,7 +79,8 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
             constraints.append(generate_generic_gini_coefficient_constraints(n, 1.0 - np.eye(n), (n - 1) * np.ones(n), (n - 1) * np.ones(n), z_bar, varpi_bar, gini))
 
     prob = cp.Problem(objective, constraints)
-    result = prob.solve(verbose=verbose)
+
+    result = prob.solve(verbose=verbose, solver=solver)
     beta_max = beta_inst.max()
 
     if gini_type == 'sgc':
@@ -112,7 +114,7 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
 
     return p_bar.value, z_bar.value, p, result, beta_inst, beta_max, gc
 
-def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=False, gini=1, gini_type='sgc'):
+def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=False, gini=1, gini_type='sgc', solver='ECOS'):
     if method == 'fractional':
         p_bar = np.zeros((T, n, 1))
         z_bar = np.zeros((T, n, 1))
@@ -125,11 +127,11 @@ def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbo
 
         for t in range(T):
             if t == 0:
-                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type)
+                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type, solver)
             else:
                 # Calculate uncleared liabilities
                 L_bar[t, :, :] = L_bar[t - 1, :, :] + L[t, :, :]
-                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L_bar[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type)
+                p_bar[t, :, :], z_bar[t, :, :], p[t, :, :], rewards[t], beta[t, :], beta_max[t], gcs[t] = single_period_clearing(L_bar[t, :, :], b[t, :], c[t, :], B, n, L_bailouts[t, :, :], verbose, gini, gini_type, solver)
 
             for i in range(n):
                 for j in range(n):
@@ -139,7 +141,7 @@ def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbo
         return p_bar, z_bar, cum_reward, beta, beta_max, gcs
     elif method == 'discrete':
         # Solve fractional problem
-        p_bar, z_bar, cum_reward, beta, beta_max, gcs = sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=verbose, gini=gini, gini_type=gini_type)
+        p_bar, z_bar, cum_reward, beta, beta_max, gcs = sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbose=verbose, gini=gini, gini_type=gini_type, solver=solver)
 
         z_bar_rounded = np.zeros_like(z_bar)
 
@@ -151,7 +153,7 @@ def sequential_clearing(L, b, c, B, n, T, L_bailouts, method='fractional', verbo
             if (gini >= 1 and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))) or(gini < 1 and gcs.max() <= gini and np.all((z_bar_rounded).sum(-1).sum(-1) <= B + np.sqrt(B))):
                 break
 
-        p_bar_rounded, _, cum_reward_rounded, beta_rounded, beta_max_rounded, gcs = sequential_clearing(L, b, c + z_bar_rounded.reshape(c.shape), 0, n, T, L_bailouts, method='fractional', verbose=verbose, gini=1, gini_type=gini_type)
+        p_bar_rounded, _, cum_reward_rounded, beta_rounded, beta_max_rounded, gcs = sequential_clearing(L, b, c + z_bar_rounded.reshape(c.shape), 0, n, T, L_bailouts, method='fractional', verbose=verbose, gini=1, gini_type=gini_type, solver=solver)
 
         return p_bar_rounded, z_bar_rounded, cum_reward_rounded, beta_rounded, beta_max_rounded, gcs
 
@@ -219,7 +221,7 @@ if __name__ == '__main__':
                 else:
                     L_bailouts = B * np.ones((T, n, 1))
 
-            p_bar, z_bar, cum_rewards, beta, beta_max, gc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=args.gini, gini_type=args.gini_type)
+            p_bar, z_bar, cum_rewards, beta, beta_max, gc = sequential_clearing(L, b, c, B, n, T, L_bailouts, method=args.method, verbose=args.verbose, gini=args.gini, gini_type=args.gini_type, solver=args.solver)
             p_bars[B].append(p_bar)
             z_bars[B].append(z_bar)
             cum_rewardss[B].append(cum_rewards)
