@@ -14,16 +14,16 @@ FONT_SIZE = 22
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--name', type=str, default='tlc', choices=['tlc', 'synthetic', 'synthetic_lp', 'venmo', 'safegraph'])
-    parser.add_argument('--filename', type=str, default='data/venmo_jul_2018.json')
-    parser.add_argument('--num_iters', type=int, default=1)
-    parser.add_argument('-B', type=str, default='0')
-    parser.add_argument('-L', type=int, default=0)
-    parser.add_argument('--method', type=str, default='fractional', choices=['fractional', 'discrete'])
-    parser.add_argument('--gini', default=1, type=float)
-    parser.add_argument('--verbose', action='store_true')
-    parser.add_argument('--gini_type', type=str, default='sgc', choices=['sgc', 'standard', 'pgc'])
-    parser.add_argument('--solver', type=str, default='ECOS')
+    parser.add_argument('--name', type=str, default='tlc', choices=['tlc', 'synthetic', 'synthetic_lp', 'venmo', 'safegraph'], help='Dataset to run experiments on (see available choices)')
+    parser.add_argument('--filename', type=str, default='data/venmo_jul_2018.json', help='Filename of Venmo dataset (only for venmo data)')
+    parser.add_argument('--num_iters', type=int, default=1, help='Number of runs of the algorithm')
+    parser.add_argument('-B', type=str, default='0', help='Total budget')
+    parser.add_argument('-L', type=int, default=0, help='Bailout value (if -1 sets it to B). Safegraph data have custom bailouts')
+    parser.add_argument('--method', type=str, default='fractional', choices=['fractional', 'discrete'], help='Bailout method')
+    parser.add_argument('--gini', default=1, type=float, help='Gini coefficient upper bound')
+    parser.add_argument('--verbose', action='store_true', help='Verbose flag for solver')
+    parser.add_argument('--gini_type', type=str, default='sgc', choices=['sgc', 'standard'], help='Type of gini coefficient constraint')
+    parser.add_argument('--solver', type=str, default='ECOS', help='Solver to use from cvxpy solvers')
     return parser.parse_args()
 
 def get_mean_std(x):
