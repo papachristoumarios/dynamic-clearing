@@ -1,4 +1,4 @@
-# Supplementary Code For: "Dynamically Allocating Resources in a Contagion Environment: A New Framework for Dynamic Resource Allocation"
+# Supplementary Code For: "Dynamic Interventions for Networked Contagions"
 
 ## Setup
 
