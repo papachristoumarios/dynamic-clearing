@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import json
+import pickle
 import networkx as nx
 
 from ast import literal_eval
@@ -40,7 +41,7 @@ def load_tlc_data(borough='Manhattan', freq='1D', eps=1):
 
 
     P = np.zeros(shape=(T, n, n), dtype=np.float64)
-    c = np.zeros(shape=(T, n), dtype=np.float64)
+    xi = np.zeros(shape=(T, n), dtype=np.float64)
     b = eps * np.ones(shape=(T, n), dtype=np.float64)
 
     for t, (timestamp, df) in enumerate(fhv_trips_resampled):
@@ -51,9 +52,9 @@ def load_tlc_data(borough='Manhattan', freq='1D', eps=1):
             elif borough == row['Borough'] and borough != row['BoroughDO']:
                 b[t, loc2idx[row['PULocationID']]] += 1
             elif borough == row['BoroughDO'] and borough != row['Borough']:
-                c[t, loc2idx[row['DOLocationID']]] += 1
+                xi[t, loc2idx[row['DOLocationID']]] += 1
 
-    return P, b, c, loc2idx, idx2zone
+    return P, b, xi, loc2idx, idx2zone
 
 def plot_tlc_data(borough='Manhattan', freq='1D'):
     P, b, c, loc2idx, idx2zone = load_tlc_data(borough=borough, freq=freq)
@@ -130,13 +131,13 @@ def generate_synthetic_data(n=50, T=10):
 
     b = np.random.exponential(1, size=(T, n))
 
-    c = np.random.exponential(1, size=(T, n))
+    xi = np.random.exponential(1, size=(T, n))
     L = G * np.random.exponential(1, size=(T, n, n))
 
     loc2idx = dict([(i, i) for i in range(n)])
     idx2zone = dict([(i, i) for i in range(n)])
 
-    return L, b, c, loc2idx, idx2zone
+    return L, b, xi, loc2idx, idx2zone
 
 
 def generate_synthetic_data_lp(n=2, T=10, method='deterministic'):
@@ -154,10 +155,10 @@ def generate_synthetic_data_lp(n=2, T=10, method='deterministic'):
         for t in range(T):
             L[t, :, :] = G
         b = np.ones((T, n)).astype(np.float64)
-        c = (n / 2) * np.ones((T, n)).astype(np.float64)
-        c = np.zeros((T, n)).astype(np.float64)
+        xi = (n / 2) * np.ones((T, n)).astype(np.float64)
+        xi = np.zeros((T, n)).astype(np.float64)
     elif method == 'random':
-        c = (n / 2) * np.random.exponential(1, size=(T, n))
+        xi = (n / 2) * np.random.exponential(1, size=(T, n))
         b = np.random.exponential(1, (T, n))
         A0 = np.random.dirichlet(np.ones(n), n)
         for i in range(n):
@@ -173,7 +174,7 @@ def generate_synthetic_data_lp(n=2, T=10, method='deterministic'):
     loc2idx = dict([(i, i) for i in range(n)])
     idx2zone = dict([(i, i) for i in range(n)])
 
-    return L, b, c, loc2idx, idx2zone
+    return L, b, xi, loc2idx, idx2zone
 
 def load_venmo_data(filename):
 
@@ -225,7 +226,7 @@ def load_venmo_data(filename):
 
     L = np.zeros((T, n, n))
     b = np.zeros((T, n))
-    c = np.zeros((T, n))
+    xi = np.zeros((T, n))
 
     for key1 in data:
         for key2, val2 in data[key1].items():
@@ -248,17 +249,19 @@ def load_venmo_data(filename):
             elif key1 == 'b':
                 b[timestamp, u] = np.random.exponential(scale=1, size=val2).sum()
             elif key1 == 'c':
-                c[timestamp, u] = np.random.exponential(scale=1, size=val2).sum()
+                xi[timestamp, u] = np.random.exponential(scale=1, size=val2).sum()
 
     b = np.maximum(1, b)
 
-    return L, b, c, node2idx, idx2node
+    return L, b, xi, node2idx, idx2node
 
 def load_safegraph_data():
     Gs = []
     T = 5
 
     for i in range(1, T + 1):
+        # with open('data/safegraph/graph_{}.gpickle'.format(i)) as f:
+            # G = pickle.load(f)
         G = nx.DiGraph(nx.read_gpickle('data/safegraph/graph_{}.gpickle'.format(i)))
         Gs.append(G)
 
@@ -285,7 +288,7 @@ def load_safegraph_data():
 
     L = np.zeros((T, n, n))
     b = np.zeros((T, n))
-    c = np.zeros((T, n))
+    xi = np.zeros((T, n))
     L_bailouts = np.zeros((T, n, 1))
 
     L_cbg_total_bailout = 0
@@ -308,7 +311,7 @@ def load_safegraph_data():
     for t, G in enumerate(Gs):
         for u, data in G.nodes(data=True):
             b[t, node2idx[u]] = data.get('liabilities', 0)
-            c[t, node2idx[u]] = data.get('assets', 0)
+            xi[t, node2idx[u]] = data.get('assets', 0)
             L_bailouts[t, node2idx[u], 0] = data.get('L', 0)
 
     b = np.maximum(b, 100)
@@ -328,4 +331,4 @@ def load_safegraph_data():
         else:
             L_bailouts[:, i] = L_poi_mean_bailout
 
-    return L, b, c, L_bailouts, node2idx, idx2node
+    return L, b, xi, L_bailouts, node2idx, idx2node
