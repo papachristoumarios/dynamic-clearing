@@ -78,7 +78,7 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
             constraints.append(generate_generic_gini_coefficient_constraints(n, 1.0 - np.eye(n), (n - 1) * np.ones(n), (n - 1) * np.ones(n), z_bar, varpi_bar, gini))
 
     prob = cp.Problem(objective, constraints)
-    result = prob.solve(verbose=verbose)
+    result = prob.solve(verbose=verbose, solver=cp.SCS)
     beta_max = beta_inst.max()
 
     if gini_type == 'sgc':
