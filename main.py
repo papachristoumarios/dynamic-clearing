@@ -11,8 +11,8 @@ import collections
 from scipy import sparse
 
 MEDIUM_SIZE = 24
-SMALL_SIZE = 0.85 * MEDIUM_SIZE
-SMALLER_SIZE = 0.65 * SMALL_SIZE
+SMALL_SIZE = 0.8 * MEDIUM_SIZE
+SMALLER_SIZE = 0.6 * SMALL_SIZE
 BIGGER_SIZE = 1.5 * MEDIUM_SIZE
 
 plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
@@ -22,7 +22,6 @@ plt.rc('xtick', labelsize=SMALLER_SIZE)    # fontsize of the tick labels
 plt.rc('ytick', labelsize=SMALLER_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=SMALLER_SIZE)    # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -91,7 +90,7 @@ def single_period_clearing(L_inst, b_inst, c_inst, B, n, L_bailouts, verbose=Fal
             constraints.append(generate_generic_gini_coefficient_constraints(n, 1.0 - np.eye(n), (n - 1) * np.ones(n), (n - 1) * np.ones(n), z_bar, varpi_bar, gini))
 
     prob = cp.Problem(objective, constraints)
-    result = prob.solve(verbose=verbose, solver=cp.SCS)
+    result = prob.solve(verbose=verbose, solver=solver)
     beta_max = beta_inst.max()
 
     if gini_type == 'sgc':
@@ -305,7 +304,7 @@ if __name__ == '__main__':
         plt.plot(t_range, beta_maxs_mean[B][:, 0], marker='o', label='B = {}'.format(B))
         plt.fill_between(t_range, beta_maxs_mean[B][:, 0] - beta_maxs_std[B][:, 0], beta_maxs_mean[B][:, 0] + beta_maxs_std[B][:, 0], alpha=0.3)
 
-    plt.legend(fontsize=14)
+    plt.legend()
     plt.savefig('figures/{}_{}_worst_financial_connectivity_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
     plt.figure(figsize=(10, 5))
@@ -321,13 +320,13 @@ if __name__ == '__main__':
         plt.plot(t_range, gcs_mean[B], marker='o', label='B = {}'.format(B))
         plt.fill_between(t_range, gcs_mean[B] - gcs_std[B], gcs_mean[B] + gcs_std[B], alpha=0.3)
 
-    plt.legend(fontsize=14)
+    plt.legend()
     plt.tight_layout()
     plt.ylim(0, 1)
     plt.savefig('figures/{}_{}_gini_coefficient_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    plt.title('Bailouts vs. Payments')
+    fig, ax = plt.subplots(figsize=(5, 5))
+    # plt.title('Bailouts vs. Payments')
     plt.xlabel('Payments')
     plt.ylabel('Bailouts')
 
@@ -348,9 +347,9 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig('figures/{}_{}_payments_vs_bailouts_{}_{}_{}.png'.format(args.method, args.name, B, args.gini, args.gini_type))
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    plt.title('Bailouts vs. Mean Financial Connectivity')
-    plt.xlabel('Mean Financial Connectivity')
+    fig, ax = plt.subplots(figsize=(5, 5))
+    # plt.title('Bailouts vs. Mean Financial Connectivity')
+    plt.xlabel('Mean Fin. Connectivity')
     plt.ylabel('Bailouts')
 
     palette = itertools.cycle(sns.color_palette())
