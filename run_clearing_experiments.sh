@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# rm -rf figures
-# mkdir -p figures
+rm -rf figures
+mkdir -p figures
 
 python3 main.py --name synthetic -B 50 --num_iters 50 --method fractional -L 50 
 python3 main.py --name venmo -B 100 --num_iters 50 --method fractional -L 100 
